@@ -1,7 +1,6 @@
 import time, datetime
 import random
 import sys
-import logging
 from pathlib import Path
 from typing import Union
 
@@ -26,15 +25,17 @@ log = logging.getLogger("flair")
 class TextDataset(Dataset):
     def __init__(
         self,
-        path: Path,
+        path: Union[str, Path],
         dictionary: Dictionary,
         expand_vocab: bool = False,
         forward: bool = True,
         split_on_char: bool = True,
         random_case_flip: bool = True,
-        shuffle_lines: bool = True,
+        document_delimiter: str = '\n',
+        shuffle: bool = True,
     ):
-
+        if type(path) is str:
+            path = Path(path)
         assert path.exists()
 
         self.files = None
@@ -44,7 +45,8 @@ class TextDataset(Dataset):
         self.forward = forward
         self.random_case_flip = random_case_flip
         self.expand_vocab = expand_vocab
-        self.shuffle_lines = shuffle_lines
+        self.document_delimiter = document_delimiter
+        self.shuffle = shuffle
 
         if path.is_dir():
             self.files = sorted([f for f in path.iterdir() if f.exists()])
@@ -65,7 +67,7 @@ class TextDataset(Dataset):
 
     def charsplit(
         self,
-        path: Path,
+        path: Union[str, Path],
         expand_vocab=False,
         forward=True,
         split_on_char=True,
@@ -73,11 +75,15 @@ class TextDataset(Dataset):
     ) -> torch.tensor:
 
         """Tokenizes a text file on character basis."""
+        if type(path) is str:
+            path = Path(path)
         assert path.exists()
 
-        lines = open(path, "r", encoding="utf-8").readlines()
+        lines = [doc + self.document_delimiter
+                 for doc in open(path, "r", encoding="utf-8").read().split(self.document_delimiter) if doc]
+
         log.info(f"read text file with {len(lines)} lines")
-        if self.shuffle_lines:
+        if self.shuffle:
             random.shuffle(lines)
             log.info(f"shuffled")
 
@@ -131,19 +137,22 @@ class TextDataset(Dataset):
                         break
                     ids[token] = self.dictionary.get_idx_for_item(char)
                     token -= 1
+
         return ids
 
     @staticmethod
     def random_casechange(line: str) -> str:
         no = random.randint(0, 99)
-        if no is 0:
+        if no == 0:
             line = line.lower()
-        if no is 1:
+        if no == 1:
             line = line.upper()
         return line
 
-    def tokenize(self, path: Path):
+    def tokenize(self, path: Union[str, Path]):
         """Tokenizes a text file."""
+        if type(path) is str:
+            path = Path(path)
         assert path.exists()
         # Add words to the dictionary
         with open(path, "r") as f:
@@ -175,13 +184,13 @@ class TextCorpus(object):
         forward: bool = True,
         character_level: bool = True,
         random_case_flip: bool = True,
-        shuffle_lines: bool = True,
+        document_delimiter: str = '\n',
     ):
         self.dictionary: Dictionary = dictionary
         self.forward = forward
         self.split_on_char = character_level
         self.random_case_flip = random_case_flip
-        self.shuffle_lines = shuffle_lines
+        self.document_delimiter: str = document_delimiter
 
         if type(path) == str:
             path = Path(path)
@@ -193,7 +202,8 @@ class TextCorpus(object):
             self.forward,
             self.split_on_char,
             self.random_case_flip,
-            shuffle_lines=self.shuffle_lines,
+            document_delimiter=self.document_delimiter,
+            shuffle=True,
         )
 
         # TextDataset returns a list. valid and test are only one file, so return the first element
@@ -204,7 +214,8 @@ class TextCorpus(object):
             self.forward,
             self.split_on_char,
             self.random_case_flip,
-            shuffle_lines=False,
+            document_delimiter=document_delimiter,
+            shuffle=False,
         )[0]
         self.test = TextDataset(
             path / "test.txt",
@@ -213,7 +224,8 @@ class TextCorpus(object):
             self.forward,
             self.split_on_char,
             self.random_case_flip,
-            shuffle_lines=False,
+            document_delimiter=document_delimiter,
+            shuffle=False,
         )[0]
 
 
@@ -290,7 +302,6 @@ class LanguageModelTrainer:
         savefile = base_path / "best-lm.pt"
 
         try:
-            epoch = self.epoch
             best_val_loss = self.loss
             optimizer = self.optimizer(
                 self.model.parameters(), lr=learning_rate, **kwargs
@@ -546,8 +557,11 @@ class LanguageModelTrainer:
 
     @staticmethod
     def load_from_checkpoint(
-        checkpoint_file: Path, corpus: TextCorpus, optimizer: Optimizer = SGD
+        checkpoint_file: Union[str, Path], corpus: TextCorpus, optimizer: Optimizer = SGD
     ):
+        if type(checkpoint_file) is str:
+            checkpoint_file = Path(checkpoint_file)
+
         checkpoint = LanguageModel.load_checkpoint(checkpoint_file)
         return LanguageModelTrainer(
             checkpoint["model"],

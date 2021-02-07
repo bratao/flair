@@ -13,11 +13,12 @@ from flair.hyperparameter import (
 )
 import flair.datasets
 
+glove_embedding: WordEmbeddings = WordEmbeddings("glove")
 
-@pytest.mark.integration
+
 def test_sequence_tagger_param_selector(results_base_path, tasks_base_path):
     corpus = flair.datasets.ColumnCorpus(
-        data_folder=tasks_base_path / "fashion", column_format={0: "text", 2: "ner"}
+        data_folder=tasks_base_path / "fashion", column_format={0: "text", 3: "ner"}
     )
 
     # define search space
@@ -27,16 +28,7 @@ def test_sequence_tagger_param_selector(results_base_path, tasks_base_path):
     search_space.add(
         Parameter.EMBEDDINGS,
         hp.choice,
-        options=[
-            StackedEmbeddings([WordEmbeddings("glove")]),
-            StackedEmbeddings(
-                [
-                    WordEmbeddings("glove"),
-                    FlairEmbeddings("news-forward-fast"),
-                    FlairEmbeddings("news-backward-fast"),
-                ]
-            ),
-        ],
+        options=[StackedEmbeddings([glove_embedding])],
     )
     search_space.add(Parameter.USE_CRF, hp.choice, options=[True, False])
     search_space.add(Parameter.DROPOUT, hp.uniform, low=0.25, high=0.75)
@@ -63,13 +55,12 @@ def test_sequence_tagger_param_selector(results_base_path, tasks_base_path):
 
     # clean up results directory
     shutil.rmtree(results_base_path)
+    del optimizer, search_space
 
 
 @pytest.mark.integration
 def test_text_classifier_param_selector(results_base_path, tasks_base_path):
     corpus = flair.datasets.ClassificationCorpus(tasks_base_path / "imdb")
-
-    glove_embedding: WordEmbeddings = WordEmbeddings("glove")
 
     search_space = SearchSpace()
 
@@ -97,3 +88,4 @@ def test_text_classifier_param_selector(results_base_path, tasks_base_path):
 
     # clean up results directory
     shutil.rmtree(results_base_path)
+    del param_selector, search_space

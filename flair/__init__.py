@@ -1,8 +1,10 @@
+import os
 import torch
 from pathlib import Path
+from transformers import set_seed as hf_set_seed
 
 # global variable: cache_root
-cache_root = Path(Path.home(), ".flair")
+cache_root = os.getenv('FLAIR_CACHE_ROOT', Path(Path.home(), ".flair"))
 
 # global variable: device
 device = None
@@ -19,10 +21,11 @@ from . import models
 from . import visual
 from . import trainers
 from . import nn
+from .training_utils import AnnealOnPlateau
 
 import logging.config
 
-__version__ = "0.4.4"
+__version__ = "0.7"
 
 logging.config.dictConfig(
     {
@@ -44,3 +47,6 @@ logging.config.dictConfig(
 )
 
 logger = logging.getLogger("flair")
+
+def set_seed(seed: int):
+    hf_set_seed(seed)

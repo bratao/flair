@@ -23,12 +23,14 @@ class LanguageModel(nn.Module):
         nlayers: int,
         embedding_size: int = 100,
         nout=None,
+        document_delimiter: str = '\n',
         dropout=0.1,
     ):
 
         super(LanguageModel, self).__init__()
 
         self.dictionary = dictionary
+        self.document_delimiter = document_delimiter
         self.is_forward_lm: bool = is_forward_lm
 
         self.dropout = dropout
@@ -176,7 +178,8 @@ class LanguageModel(nn.Module):
         else:
             return tuple(self.repackage_hidden(v) for v in h)
 
-    def initialize(self, matrix):
+    @staticmethod
+    def initialize(matrix):
         in_, out_ = matrix.size()
         stdv = math.sqrt(3.0 / (in_ + out_))
         matrix.detach().uniform_(-stdv, stdv)
@@ -186,14 +189,17 @@ class LanguageModel(nn.Module):
 
         state = torch.load(str(model_file), map_location=flair.device)
 
+        document_delimiter = state["document_delimiter"] if "document_delimiter" in state else '\n'
+
         model = LanguageModel(
-            state["dictionary"],
-            state["is_forward_lm"],
-            state["hidden_size"],
-            state["nlayers"],
-            state["embedding_size"],
-            state["nout"],
-            state["dropout"],
+            dictionary=state["dictionary"],
+            is_forward_lm=state["is_forward_lm"],
+            hidden_size=state["hidden_size"],
+            nlayers=state["nlayers"],
+            embedding_size=state["embedding_size"],
+            nout=state["nout"],
+            document_delimiter=document_delimiter,
+            dropout=state["dropout"],
         )
         model.load_state_dict(state["state_dict"])
         model.eval()
@@ -202,24 +208,27 @@ class LanguageModel(nn.Module):
         return model
 
     @classmethod
-    def load_checkpoint(cls, model_file: Path):
+    def load_checkpoint(cls, model_file: Union[Path, str]):
         state = torch.load(str(model_file), map_location=flair.device)
 
         epoch = state["epoch"] if "epoch" in state else None
         split = state["split"] if "split" in state else None
         loss = state["loss"] if "loss" in state else None
+        document_delimiter = state["document_delimiter"] if "document_delimiter" in state else '\n'
+
         optimizer_state_dict = (
             state["optimizer_state_dict"] if "optimizer_state_dict" in state else None
         )
 
         model = LanguageModel(
-            state["dictionary"],
-            state["is_forward_lm"],
-            state["hidden_size"],
-            state["nlayers"],
-            state["embedding_size"],
-            state["nout"],
-            state["dropout"],
+            dictionary=state["dictionary"],
+            is_forward_lm=state["is_forward_lm"],
+            hidden_size=state["hidden_size"],
+            nlayers=state["nlayers"],
+            embedding_size=state["embedding_size"],
+            nout=state["nout"],
+            document_delimiter=document_delimiter,
+            dropout=state["dropout"],
         )
         model.load_state_dict(state["state_dict"])
         model.eval()
@@ -234,7 +243,7 @@ class LanguageModel(nn.Module):
         }
 
     def save_checkpoint(
-        self, file: Path, optimizer: Optimizer, epoch: int, split: int, loss: float
+        self, file: Union[Path, str], optimizer: Optimizer, epoch: int, split: int, loss: float
     ):
         model_state = {
             "state_dict": self.state_dict(),
@@ -244,6 +253,7 @@ class LanguageModel(nn.Module):
             "nlayers": self.nlayers,
             "embedding_size": self.embedding_size,
             "nout": self.nout,
+            "document_delimiter": self.document_delimiter,
             "dropout": self.dropout,
             "optimizer_state_dict": optimizer.state_dict(),
             "epoch": epoch,
@@ -253,7 +263,7 @@ class LanguageModel(nn.Module):
 
         torch.save(model_state, str(file), pickle_protocol=4)
 
-    def save(self, file: Path):
+    def save(self, file: Union[Path, str]):
         model_state = {
             "state_dict": self.state_dict(),
             "dictionary": self.dictionary,
@@ -262,6 +272,7 @@ class LanguageModel(nn.Module):
             "nlayers": self.nlayers,
             "embedding_size": self.embedding_size,
             "nout": self.nout,
+            "document_delimiter": self.document_delimiter,
             "dropout": self.dropout,
         }
 
@@ -387,3 +398,31 @@ class LanguageModel(nn.Module):
         perplexity = math.exp(loss)
 
         return perplexity
+
+    def _apply(self, fn):
+
+        # models that were serialized using torch versions older than 1.4.0 lack the _flat_weights_names attribute
+        # check if this is the case and if so, set it
+        for child_module in self.children():
+            if isinstance(child_module, torch.nn.RNNBase) and not hasattr(child_module, "_flat_weights_names"):
+                _flat_weights_names = []
+
+                if child_module.__dict__["bidirectional"]:
+                    num_direction = 2
+                else:
+                    num_direction = 1
+                for layer in range(child_module.__dict__["num_layers"]):
+                    for direction in range(num_direction):
+                        suffix = "_reverse" if direction == 1 else ""
+                        param_names = ["weight_ih_l{}{}", "weight_hh_l{}{}"]
+                        if child_module.__dict__["bias"]:
+                            param_names += ["bias_ih_l{}{}", "bias_hh_l{}{}"]
+                        param_names = [
+                            x.format(layer, suffix) for x in param_names
+                        ]
+                        _flat_weights_names.extend(param_names)
+
+                setattr(child_module, "_flat_weights_names",
+                        _flat_weights_names)
+
+            child_module._apply(fn)

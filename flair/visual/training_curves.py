@@ -6,17 +6,7 @@ from typing import Union, List
 import numpy as np
 import csv
 
-import matplotlib
 import math
-
-
-# change from Agg to TkAgg for interactive mode
-try:
-    # change from Agg to TkAgg for interactive mode
-    matplotlib.use("TkAgg")
-except:
-    pass
-
 
 import matplotlib.pyplot as plt
 
@@ -37,7 +27,10 @@ class Plotter(object):
     """
 
     @staticmethod
-    def _extract_evaluation_data(file_name: Path, score: str = "F1") -> dict:
+    def _extract_evaluation_data(file_name: Union[str, Path], score: str = "F1") -> dict:
+        if type(file_name) is str:
+            file_name = Path(file_name)
+
         training_curves = {
             "train": {"loss": [], "score": []},
             "test": {"loss": [], "score": []},
@@ -64,7 +57,7 @@ class Plotter(object):
                 row.index(f"TRAIN_{score}") if f"TRAIN_{score}" in row else None
             )
             DEV_SCORE = row.index(f"DEV_{score}") if f"DEV_{score}" in row else None
-            TEST_SCORE = row.index(f"TEST_{score}")
+            TEST_SCORE = row.index(f"TEST_{score}") if f"TEST_{score}" in row else None
 
             # then get all relevant values from the tsv
             for row in tsvin:
@@ -79,13 +72,17 @@ class Plotter(object):
                     if row[DEV_SCORE] != "_":
                         training_curves["dev"]["score"].append(float(row[DEV_SCORE]))
 
-                if row[TEST_SCORE] != "_":
-                    training_curves["test"]["score"].append(float(row[TEST_SCORE]))
+                if TEST_SCORE is not None:
+                    if row[TEST_SCORE] != "_":
+                        training_curves["test"]["score"].append(float(row[TEST_SCORE]))
 
         return training_curves
 
     @staticmethod
-    def _extract_weight_data(file_name: Path) -> dict:
+    def _extract_weight_data(file_name: Union[str, Path]) -> dict:
+        if type(file_name) is str:
+            file_name = Path(file_name)
+
         weights = defaultdict(lambda: defaultdict(lambda: list()))
 
         with open(file_name, "r") as tsvin:
@@ -101,7 +98,10 @@ class Plotter(object):
         return weights
 
     @staticmethod
-    def _extract_learning_rate(file_name: Path):
+    def _extract_learning_rate(file_name: Union[str, Path]):
+        if type(file_name) is str:
+            file_name = Path(file_name)
+
         lrs = []
         losses = []
 
@@ -129,11 +129,8 @@ class Plotter(object):
         total = len(weights)
         columns = 2
         rows = max(2, int(math.ceil(total / columns)))
-        # print(rows)
 
-        # figsize = (16, 16)
-        if rows != columns:
-            figsize = (8, rows + 0)
+        figsize = (4*columns, 3*rows)
 
         fig = plt.figure()
         f, axarr = plt.subplots(rows, columns, figsize=figsize)

@@ -1,34 +1,15 @@
-# Transformers
+# TransformerWordEmbeddings
 
-Thanks to the brilliant [`transformers`](https://github.com/huggingface/transformers) library from [Hugging Face](https://github.com/huggingface),
-Flair is able to support various Transformer-based architectures like BERT or XLNet.
+Thanks to the brilliant [`transformers`](https://github.com/huggingface/transformers) library from [HuggingFace](https://github.com/huggingface), 
+Flair is able to support various Transformer-based architectures like BERT or XLNet. 
 
-The following embeddings can be used in Flair:
-
-* `BertEmbeddings`
-* `OpenAIGPTEmbeddings`
-* `OpenAIGPT2Embeddings`
-* `TransformerXLEmbeddings`
-* `XLNetEmbeddings`
-* `XLMEmbeddings`
-* `RoBERTaEmbeddings`
-* `CamembertEmbeddings`
-
-This section shows how to use these Transformer-based architectures in Flair and is heavily based on the excellent
-[Transformers pre-trained models documentation](https://huggingface.co/transformers/pretrained_models.html).
-
-## BERT Embeddings
-
-[BERT embeddings](https://arxiv.org/pdf/1810.04805.pdf) were developed by Devlin et al. (2018) and are a different kind
-of powerful word embedding based on a bidirectional transformer architecture.
-The embeddings itself are wrapped into our simple embedding interface, so that they can be used like any other
-embedding.
+As of version 0.5 of Flair, there is a single class for all transformer embeddings that you instantiate with different identifiers get different transformers. For instance, to load a standard BERT transformer model, do:  
 
 ```python
-from flair.embeddings import BertEmbeddings
+from flair.embeddings import TransformerWordEmbeddings
 
 # init embedding
-embedding = BertEmbeddings()
+embedding = TransformerWordEmbeddings('bert-base-uncased')
 
 # create a sentence
 sentence = Sentence('The grass is green .')
@@ -37,330 +18,80 @@ sentence = Sentence('The grass is green .')
 embedding.embed(sentence)
 ```
 
-The `BertEmbeddings` class has several arguments:
+If instead you want to use RoBERTa, do: 
+
+```python
+from flair.embeddings import TransformerWordEmbeddings
+
+# init embedding
+embedding = TransformerWordEmbeddings('roberta-base')
+
+# create a sentence
+sentence = Sentence('The grass is green .')
+
+# embed words in sentence
+embedding.embed(sentence)
+```
+
+[Here](https://huggingface.co/transformers/pretrained_models.html) is a full list of all models (BERT, RoBERTa, XLM, XLNet etc.). You can use any of these models with this class. 
+
+
+## Arguments
+
+There are several options that you can set when you init the TransformerWordEmbeddings class:
 
 | Argument             | Default             | Description
-| -------------------- | ------------------- | -------------------------------------------------
-| `bert_model_or_path` | `bert-base-uncased` | Defines BERT model or points to user-defined path
-| `layers`             | `-1,-2,-3,-4`       | Defines the to be used layers of the Transformer-based model
+| -------------------- | ------------------- | ------------------------------------------------------------------------------
+| `model` | `bert-base-uncased` | The string identifier of the transformer model you want to use (see above)
+| `layers`             | `-1,-2,-3,-4`       | Defines the layers of the Transformer-based model that produce the embedding
 | `pooling_operation`  | `first`             | See [Pooling operation section](#Pooling-operation).
 | `use_scalar_mix`     | `False`             | See [Scalar mix section](#Scalar-mix).
+| `batch_size`     | 1             | How many sentences to push through transformer simultaneously (high means faster but more memory usage)
+| `fine_tune`     | `False`             | Whether or not embeddings are fine-tuneable.
+| `allow_long_sentences`     | `False`             | Whether or not texts longer than maximal sequence length are supported.
 
-You can load any of the pre-trained BERT models by providing `bert_model_or_path` during initialization:
 
-| Model                                                   | Details
-| ------------------------------------------------------- | -----------------------------------------------
-| `bert-base-uncased`                                     | 12-layer, 768-hidden, 12-heads, 110M parameters
-|                                                         | Trained on lower-cased English text
-| `bert-large-uncased`                                    | 24-layer, 1024-hidden, 16-heads, 340M parameters
-|                                                         | Trained on lower-cased English text
-| `bert-base-cased`                                       | 12-layer, 768-hidden, 12-heads, 110M parameters
-|                                                         | Trained on cased English text
-| `bert-large-cased`                                      | 24-layer, 1024-hidden, 16-heads, 340M parameters
-|                                                         | Trained on cased English text
-| `bert-base-multilingual-uncased`                        | (Original, not recommended) 12-layer, 768-hidden, 12-heads, 110M parameters
-|                                                         | Trained on lower-cased text in the top 102 languages with the largest Wikipedias
-|                                                         | (see [details](https://github.com/google-research/bert/blob/master/multilingual.md))
-| `bert-base-multilingual-cased`                          | (New, **recommended**) 12-layer, 768-hidden, 12-heads, 110M parameters
-|                                                         | Trained on cased text in the top 104 languages with the largest Wikipedias
-|                                                         | (see [details](https://github.com/google-research/bert/blob/master/multilingual.md))
-| `bert-base-chinese`                                     | 12-layer, 768-hidden, 12-heads, 110M parameters
-|                                                         | Trained on cased Chinese Simplified and Traditional text
-| `bert-base-german-cased`                                | 12-layer, 768-hidden, 12-heads, 110M parameters
-|                                                         | Trained on cased German text by Deepset.ai
-|                                                         | (see [details on deepset.ai website](https://deepset.ai/german-bert))
-| `bert-large-uncased-whole-word-masking`                 | 24-layer, 1024-hidden, 16-heads, 340M parameters
-|                                                         | Trained on lower-cased English text using Whole-Word-Masking
-|                                                         | (see [details](https://github.com/google-research/bert/#bert))
-| `bert-large-cased-whole-word-masking`                   | 24-layer, 1024-hidden, 16-heads, 340M parameters
-|                                                         | Trained on cased English text using Whole-Word-Masking
-|                                                         | (see [details](https://github.com/google-research/bert/#bert))
-| `bert-large-uncased-whole-word-masking-finetuned-squad` | 24-layer, 1024-hidden, 16-heads, 340M parameters
-|                                                         | The `bert-large-uncased-whole-word-masking` model fine-tuned on SQuAD (see details of fine-tuning in the
-|                                                         | [example section of Transformers](https://github.com/huggingface/transformers/tree/master/examples))
-| `bert-large-cased-whole-word-masking-finetuned-squad`   | 24-layer, 1024-hidden, 16-heads, 340M parameters
-|                                                         | The `bert-large-cased-whole-word-masking` model fine-tuned on SQuAD
-|                                                         | (see [details of fine-tuning in the example section](https://huggingface.co/transformers/examples.html))
-| `bert-base-cased-finetuned-mrpc`                        | 12-layer, 768-hidden, 12-heads, 110M parameters
-|                                                         | The `bert-base-cased` model fine-tuned on MRPC
-|                                                         | (see [details of fine-tuning in the example section of Transformers](https://huggingface.co/transformers/examples.html))
+### Layers
 
-It is also possible to use [distilled versions](https://medium.com/huggingface/distilbert-8cf3380435b5)
-of BERT (DistilBERT):
+The `layers` argument controls which transformer layers are used for the embedding. If you set this value to '-1,-2,-3,-4', the top 4 layers are used to make an embedding. If you set it to '-1', only the last layer is used. If you set it to "all", then all layers are used.
 
-| Model                                     | Details
-| ----------------------------------------- | ------------------------------------------------------------------------------------------------------------------
-| `distilbert-base-uncased`                 | 6-layer, 768-hidden, 12-heads, 66M parameters
-|                                           | The DistilBERT model distilled from the BERT model `bert-base-uncased` checkpoint
-|                                           | (see [details](https://medium.com/huggingface/distilbert-8cf3380435b5))
-| `distilbert-base-uncased-distilled-squad` | 6-layer, 768-hidden, 12-heads, 66M parameters
-|                                           | The DistilBERT model distilled from the BERT model `bert-base-uncased` checkpoint, with an additional linear layer.
-|                                           | (see [details](https://medium.com/huggingface/distilbert-8cf3380435b5))
-
-## OpenAI GPT Embeddings
-
-The OpenAI GPT model was proposed by [Radford et. al (2018)](https://s3-us-west-2.amazonaws.com/openai-assets/research-covers/language-unsupervised/language_understanding_paper.pdf).
-GPT is an uni-directional Transformer-based model.
-
-The following example shows how to use the `OpenAIGPTEmbeddings`:
+This affects the length of an embedding, since layers are just concatenated. 
 
 ```python
-from flair.embeddings import OpenAIGPTEmbeddings
+from flair.data import Sentence
+from flair.embeddings import TransformerWordEmbeddings
 
-# init embedding
-embedding = OpenAIGPTEmbeddings()
+sentence = Sentence('The grass is green.')
 
-# create a sentence
-sentence = Sentence('Berlin and Munich are nice cities .')
+# use only last layers
+embeddings = TransformerWordEmbeddings('bert-base-uncased', layers='-1')
+embeddings.embed(sentence)
+print(sentence[0].embedding.size())
 
-# embed words in sentence
-embedding.embed(sentence)
+sentence.clear_embeddings()
+
+# use last two layers
+embeddings = TransformerWordEmbeddings('bert-base-uncased', layers='-1,-2')
+embeddings.embed(sentence)
+print(sentence[0].embedding.size())
+
+sentence.clear_embeddings()
+
+# use ALL layers
+embeddings = TransformerWordEmbeddings('bert-base-uncased', layers='all')
+embeddings.embed(sentence)
+print(sentence[0].embedding.size())
 ```
 
-The `OpenAIGPTEmbeddings` class has several arguments:
-
-| Argument                        | Default      | Description
-| ------------------------------- | ------------ | -------------------------------------------------
-| `pretrained_model_name_or_path` | `openai-gpt` | Defines name or path of GPT model
-| `layers`                        | `1`          | Defines the to be used layers of the Transformer-based model
-| `pooling_operation`             | `first_last` | See [Pooling operation section](#Pooling-operation)
-| `use_scalar_mix`                | `False`      | See [Scalar mix section](#Scalar-mix)
-
-## OpenAI GPT-2 Embeddings
-
-The OpenAI GPT-2 model was proposed by [Radford et. al (2018)](https://d4mucfpksywv.cloudfront.net/better-language-models/language_models_are_unsupervised_multitask_learners.pdf).
-GPT-2 is also an uni-directional Transformer-based model, that was trained on a larger corpus compared to the GPT model.
-
-The GPT-2 model can be used with the `OpenAIGPT2Embeddings` class:
-
-```python
-from flair.embeddings import OpenAIGPT2Embeddings
-
-# init embedding
-embedding = OpenAIGPT2Embeddings()
-
-# create a sentence
-sentence = Sentence('The Englischer Garten is a large public park in the centre of Munich .')
-
-# embed words in sentence
-embedding.embed(sentence)
+This should print: 
+```console
+torch.Size([768])
+torch.Size([1536])
+torch.Size([9984])
 ```
 
-The `OpenAIGPT2Embeddings` class has several arguments:
+I.e. the size of the embedding increases the mode layers we use.
 
-| Argument                        | Default       | Description
-| ------------------------------- | ------------- | -------------------------------------------------
-| `pretrained_model_name_or_path` | `gpt2-medium` | Defines name or path of GPT-2 model
-| `layers`                        | `1`           | Defines the to be used layers of the Transformer-based model
-| `pooling_operation`             | `first_last`  | See [Pooling operation section](#Pooling-operation)
-| `use_scalar_mix`                | `False`       | See [Scalar mix section](#Scalar-mix)
-
-Following GPT-2 models can be used:
-
-| Model         | Details
-| ------------- | -----------------------------------------------
-| `gpt2`        | 12-layer, 768-hidden, 12-heads, 117M parameters
-|               | OpenAI GPT-2 English model
-| `gpt2-medium` | 24-layer, 1024-hidden, 16-heads, 345M parameters
-|               | OpenAI's Medium-sized GPT-2 English model
-| `gpt2-large`  | 36-layer, 1280-hidden, 20-heads, 774M parameters
-|               | OpenAI's Large-sized GPT-2 English model
-
-## Transformer-XL Embeddings
-
-The Transformer-XL model was proposed by [Dai et. al (2019)](https://arxiv.org/abs/1901.02860).
-It is an uni-directional Transformer-based model with relative positioning embeddings.
-
-The Transformer-XL model can be used with the `TransformerXLEmbeddings` class:
-
-```python
-from flair.embeddings import TransformerXLEmbeddings
-
-# init embedding
-embedding = TransformerXLEmbeddings()
-
-# create a sentence
-sentence = Sentence('The Berlin Zoological Garden is the oldest and best-known zoo in Germany .')
-
-# embed words in sentence
-embedding.embed(sentence)
-```
-
-The following arguments can be passed to the `TransformerXLEmbeddings` class:
-
-| Argument                        | Default            | Description
-| ------------------------------- | ------------------ | -------------------------------------------------
-| `pretrained_model_name_or_path` | `transfo-xl-wt103` | Defines name or path of Transformer-XL model
-| `layers`                        | `1,2,3`            | Defines the to be used layers of the Transformer-based model
-| `use_scalar_mix`                | `False`            | See [Scalar mix section](#Scalar-mix)
-
-Notice: The Transformer-XL model (trained on WikiText-103) is a word-based language model. Thus, no subword tokenization
-is necessary is needed (`pooling_operation` is not needed).
-
-## XLNet Embeddings
-
-The XLNet model was proposed by [Yang et. al (2019)](https://arxiv.org/abs/1906.08237).
-It is an extension of the Transformer-XL model using an autoregressive method to learn bi-directional contexts.
-
-The XLNet model can be used with the `XLNetEmbeddings` class:
-
-```python
-from flair.embeddings import XLNetEmbeddings
-
-# init embedding
-embedding = XLNetEmbeddings()
-
-# create a sentence
-sentence = Sentence('The Hofbräuhaus is a beer hall in Munich .')
-
-# embed words in sentence
-embedding.embed(sentence)
-```
-
-The following arguments can be passed to the `XLNetEmbeddings` class:
-
-| Argument                        | Default             | Description
-| ------------------------------- | ------------------- | -------------------------------------------------
-| `pretrained_model_name_or_path` | `xlnet-large-cased` | Defines name or path of XLNet model
-| `layers`                        | `1`                 | Defines the to be used layers of the Transformer-based model
-| `pooling_operation`             | `first_last`        | See [Pooling operation section](#Pooling-operation)
-| `use_scalar_mix`                | `False`             | See [Scalar mix section](#Scalar-mix)
-
-Following XLNet models can be used:
-
-| Model              | Details
-| ------------------ | -----------------------------------------------
-| `xlnet-base-cased` | 12-layer, 768-hidden, 12-heads, 110M parameters
-|                    | XLNet English model
-| `xlnet-large-cased`| 24-layer, 1024-hidden, 16-heads, 340M parameters
-|                    | XLNet Large English model
-
-## XLM Embeddings
-
-The XLM model was proposed by [Lample and Conneau (2019)](https://arxiv.org/abs/1901.07291).
-It extends the generative pre-training approach for English to multiple languages and show the effectiveness of
-cross-lingual pretraining.
-
-The XLM model can be used with the `XLMEmbeddings` class:
-
-```python
-from flair.embeddings import XLMEmbeddings
-
-# init embedding
-embedding = XLMEmbeddings()
-
-# create a sentence
-sentence = Sentence('The BER is an international airport under construction near Berlin .')
-
-# embed words in sentence
-embedding.embed(sentence)
-```
-
-The following arguments can be passed to the `XLMEmbeddings` class:
-
-| Argument                        | Default             | Description
-| ------------------------------- | ------------------- | -------------------------------------------------
-| `pretrained_model_name_or_path` | `xlm-mlm-en-2048`   | Defines name or path of XLM model
-| `layers`                        | `1`                 | Defines the to be used layers of the Transformer-based model
-| `pooling_operation`             | `first_last`        | See [Pooling operation section](#Pooling-operation)
-| `use_scalar_mix`                | `False`             | See [Scalar mix section](#Scalar-mix)
-
-Following XLM models can be used:
-
-| Model                     | Details
-| ------------------------- | -------------------------------------------------------------------------------------------------------
-| `xlm-mlm-en-2048`         | 12-layer, 1024-hidden, 8-heads
-|                           | XLM English model
-| `xlm-mlm-ende-1024`       | 6-layer, 1024-hidden, 8-heads
-|                           | XLM English-German Multi-language model
-| `xlm-mlm-enfr-1024`       | 6-layer, 1024-hidden, 8-heads
-|                           | XLM English-French Multi-language model
-| `xlm-mlm-enro-1024`       | 6-layer, 1024-hidden, 8-heads
-|                           | XLM English-Romanian Multi-language model
-| `xlm-mlm-xnli15-1024`     | 12-layer, 1024-hidden, 8-heads
-|                           | XLM Model pre-trained with MLM on the [15 XNLI languages](https://github.com/facebookresearch/XNLI)
-| `xlm-mlm-tlm-xnli15-1024` | 12-layer, 1024-hidden, 8-heads
-|                           | XLM Model pre-trained with MLM + TLM on the [15 XNLI languages](https://github.com/facebookresearch/XNLI)
-| `xlm-clm-enfr-1024`       | 12-layer, 1024-hidden, 8-heads
-|                           | XLM English model trained with CLM (Causal Language Modeling)
-| `xlm-clm-ende-1024`       | 6-layer, 1024-hidden, 8-heads
-|                           | XLM English-German Multi-language model trained with CLM (Causal Language Modeling)
-
-## RoBERTa Embeddings
-
-The RoBERTa (**R**obustly **o**ptimized **BERT** pre-training **a**pproach) model was proposed by [Liu et. al (2019)](https://arxiv.org/abs/1907.11692),
-and uses an improved pre-training procedure to train a BERT model on a large corpus.
-
-It can be used with the `RoBERTaEmbeddings` class:
-
-```python
-from flair.embeddings import RoBERTaEmbeddings
-
-# init embedding
-embedding = RoBERTaEmbeddings()
-
-# create a sentence
-sentence = Sentence("The Oktoberfest is the world's largest Volksfest .")
-
-# embed words in sentence
-embedding.embed(sentence)
-```
-
-The following arguments can be passed to the `RoBERTaEmbeddings` class:
-
-| Argument                        | Default         | Description
-| ------------------------------- | --------------- | -------------------------------------------------
-| `pretrained_model_name_or_path` | `roberta-base`  | Defines name or path of RoBERTa model
-| `layers`                        | `-1`            | Defines the to be used layers of the Transformer-based model
-| `pooling_operation`             | `first`         | [Pooling operation section](#Pooling-operation)
-| `use_scalar_mix`                | `False`         | [Scalar mix section](#Scalar-mix)
-
-Following RoBERTa models can be used:
-
-| Model                | Details
-| -------------------- | -------------------------------------------------------------------------------------------------------
-| `roberta-base`       | 12-layer, 768-hidden, 12-heads
-|                      | RoBERTa English model
-| `roberta-large`      | 24-layer, 1024-hidden, 16-heads
-|                      | RoBERTa English model
-| `roberta-large-mnli` | 24-layer, 1024-hidden, 16-heads
-|                      | RoBERTa English model, finetuned on MNLI
-
-## CamemBERT Embeddings
-
-CamemBERT (a Tasty French Language Model) model was proposed by [Martin et. al (2019)](https://arxiv.org/abs/1911.03894),
-and was trained on a large French corpus.
-
-It can be used with the `CamembertEmbeddings` class:
-
-```python
-from flair.embeddings import CamembertEmbeddings
-
-# init embedding
-embedding = CamembertEmbeddings()
-
-# create a sentence
-sentence = Sentence("J'aime le camembert !")
-
-# embed words in sentence
-embedding.embed(sentence)
-```
-
-The following arguments can be passed to the `CamembertEmbeddings` class:
-
-| Argument                        | Default          | Description
-| ------------------------------- | ---------------- | ------------------------------------------------------------
-| `pretrained_model_name_or_path` | `camembert-base` | Defines name or path of CamemBERT model
-| `layers`                        | `-1`             | Defines the to be used layers of the Transformer-based model
-| `pooling_operation`             | `first`          | [Pooling operation section](#Pooling-operation)
-| `use_scalar_mix`                | `False`          | [Scalar mix section](#Scalar-mix)
-
-Following CamemBERT models can be used:
-
-| Model                | Details
-| -------------------- | -----------------------------------------------
-| `camembert-base`     | 12-layer, 768-hidden, 12-heads, 110M parameters
-|                      | CamemBERT using the RoBERTa-base architecture
 
 ### Pooling operation
 
@@ -374,7 +105,16 @@ We implement different pooling operations for these subwords to generate the fin
 * `first_last`: embeddings of the first and last subwords are concatenated and used
 * `mean`: a `torch.mean` over all subword embeddings is calculated and used
 
-## Scalar mix
+You can choose which one to use by passing this in the constructor: 
+
+```python
+# use first and last subtoken for each word
+embeddings = TransformerWordEmbeddings('bert-base-uncased', pooling_operation='first_last')
+embeddings.embed(sentence)
+print(sentence[0].embedding.size())
+```
+
+### Scalar mix
 
 The Transformer-based models have a certain number of layers. [Liu et. al (2019)](https://arxiv.org/abs/1903.08855)
 propose a technique called scalar mix, that computes a parameterised scalar mixture of user-defined layers.
@@ -386,11 +126,10 @@ To use scalar mix, all Transformer-based embeddings in Flair come with a `use_sc
 example shows how to use scalar mix for a base RoBERTa model on all layers:
 
 ```python
-from flair.embeddings import RoBERTaEmbeddings
+from flair.embeddings import TransformerWordEmbeddings
 
 # init embedding
-embedding = RoBERTaEmbeddings(pretrained_model_name_or_path="roberta-base", layers="0,1,2,3,4,5,6,7,8,9,10,11,12",
-                              pooling_operation="first", use_scalar_mix=True)
+embedding = TransformerWordEmbeddings("roberta-base", layers="all", layer_mean=True)
 
 # create a sentence
 sentence = Sentence("The Oktoberfest is the world's largest Volksfest .")
@@ -398,3 +137,26 @@ sentence = Sentence("The Oktoberfest is the world's largest Volksfest .")
 # embed words in sentence
 embedding.embed(sentence)
 ```
+
+### Fine-tuneable or not
+
+In some setups, you may wish to fine-tune the transformer embeddings. In this case, set fine_tune=True in the init method: 
+
+```python
+# use first and last subtoken for each word
+embeddings = TransformerWordEmbeddings('bert-base-uncased', fine_tune=True)
+embeddings.embed(sentence)
+print(sentence[0].embedding)
+```
+
+This will print a tensor that now has a gradient function and can be fine-tuned if you use it in a training routine.
+
+```python
+tensor([-0.0323, -0.3904, -1.1946,  ...,  0.1305, -0.1365, -0.4323],
+       device='cuda:0', grad_fn=<CatBackward>)
+```
+
+### Models
+
+Please have a look at the awesome Hugging Face [documentation](https://huggingface.co/transformers/v2.3.0/pretrained_models.html)
+for all supported pretrained models!
