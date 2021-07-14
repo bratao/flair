@@ -4,24 +4,22 @@ from typing import List, Union, Dict, Optional, Set
 
 import torch
 import torch.nn as nn
-from torch.utils.data.dataset import Dataset
 from tqdm import tqdm
 import numpy as np
 
-import sklearn.metrics as metrics
 from sklearn.metrics.pairwise import cosine_similarity
 from sklearn.preprocessing import minmax_scale
 import flair.nn
 import flair.embeddings
-from flair.data import Dictionary, Sentence, Label, DataPoint
+from flair.data import Dictionary, Sentence, Label, DataPoint, DataPair
 from flair.datasets import SentenceDataset, DataLoader
 from flair.file_utils import cached_path
-from flair.training_utils import convert_labels_to_one_hot, Result, store_embeddings
+from flair.training_utils import convert_labels_to_one_hot, store_embeddings
 
 log = logging.getLogger("flair")
 
 
-class TextClassifier(flair.nn.Model):
+class TextClassifier(flair.nn.Classifier):
     """
     Text Classification Model
     The model takes word embeddings, puts them into an RNN to obtain a text representation, and puts the
@@ -33,7 +31,7 @@ class TextClassifier(flair.nn.Model):
             self,
             document_embeddings: flair.embeddings.DocumentEmbeddings,
             label_dictionary: Dictionary,
-            label_type: str = None,
+            label_type: str,
             multi_label: bool = None,
             multi_label_threshold: float = 0.5,
             beta: float = 1.0,
@@ -53,9 +51,9 @@ class TextClassifier(flair.nn.Model):
 
         super(TextClassifier, self).__init__()
 
-        self.document_embeddings: flair.embeddings.DocumentRNNEmbeddings = document_embeddings
+        self.document_embeddings: flair.embeddings.DocumentEmbeddings = document_embeddings
         self.label_dictionary: Dictionary = label_dictionary
-        self.label_type = label_type
+        self._label_type = label_type
 
         if multi_label is not None:
             self.multi_label = multi_label
@@ -195,7 +193,7 @@ class TextClassifier(flair.nn.Model):
                 sentences = [sentences]
 
             # filter empty sentences
-            if isinstance(sentences[0], Sentence):
+            if isinstance(sentences[0], DataPoint):
                 sentences = [sentence for sentence in sentences if len(sentence) > 0]
             if len(sentences) == 0: return sentences
 
@@ -247,138 +245,6 @@ class TextClassifier(flair.nn.Model):
 
             if return_loss:
                 return overall_loss / batch_no
-
-    def evaluate(
-            self,
-            sentences: Union[List[DataPoint], Dataset],
-            out_path: Union[str, Path] = None,
-            embedding_storage_mode: str = "none",
-            mini_batch_size: int = 32,
-            num_workers: int = 8,
-    ) -> (Result, float):
-
-        # read Dataset into data loader (if list of sentences passed, make Dataset first)
-        if not isinstance(sentences, Dataset):
-            sentences = SentenceDataset(sentences)
-        data_loader = DataLoader(sentences, batch_size=mini_batch_size, num_workers=num_workers)
-
-        # use scikit-learn to evaluate
-        y_true = []
-        y_pred = []
-
-        with torch.no_grad():
-            eval_loss = 0
-
-            lines: List[str] = []
-            batch_count: int = 0
-            for batch in data_loader:
-
-                batch_count += 1
-
-                # remove previously predicted labels
-                [sentence.remove_labels('predicted') for sentence in batch]
-
-                # get the gold labels
-                true_values_for_batch = [sentence.get_labels(self.label_type) for sentence in batch]
-
-                # predict for batch
-                loss = self.predict(batch,
-                                    embedding_storage_mode=embedding_storage_mode,
-                                    mini_batch_size=mini_batch_size,
-                                    label_name='predicted',
-                                    return_loss=True)
-
-                eval_loss += loss
-
-                sentences_for_batch = [sent.to_plain_string() for sent in batch]
-
-                # get the predicted labels
-                predictions = [sentence.get_labels('predicted') for sentence in batch]
-
-                for sentence, prediction, true_value in zip(
-                        sentences_for_batch,
-                        predictions,
-                        true_values_for_batch,
-                ):
-                    eval_line = "{}\t{}\t{}\n".format(
-                        sentence, true_value, prediction
-                    )
-                    lines.append(eval_line)
-
-                for predictions_for_sentence, true_values_for_sentence in zip(
-                        predictions, true_values_for_batch
-                ):
-
-                    true_values_for_sentence = [label.value for label in true_values_for_sentence]
-                    predictions_for_sentence = [label.value for label in predictions_for_sentence]
-
-                    y_true_instance = np.zeros(len(self.label_dictionary), dtype=int)
-                    for i in range(len(self.label_dictionary)):
-                        if self.label_dictionary.get_item_for_index(i) in true_values_for_sentence:
-                            y_true_instance[i] = 1
-                    y_true.append(y_true_instance.tolist())
-
-                    y_pred_instance = np.zeros(len(self.label_dictionary), dtype=int)
-                    for i in range(len(self.label_dictionary)):
-                        if self.label_dictionary.get_item_for_index(i) in predictions_for_sentence:
-                            y_pred_instance[i] = 1
-                    y_pred.append(y_pred_instance.tolist())
-
-                store_embeddings(batch, embedding_storage_mode)
-
-            # remove predicted labels
-            for sentence in sentences:
-                sentence.annotation_layers['predicted'] = []
-
-            if out_path is not None:
-                with open(out_path, "w", encoding="utf-8") as outfile:
-                    outfile.write("".join(lines))
-
-            # make "classification report"
-            target_names = []
-            for i in range(len(self.label_dictionary)):
-                target_names.append(self.label_dictionary.get_item_for_index(i))
-            classification_report = metrics.classification_report(y_true, y_pred, digits=4,
-                                                                  target_names=target_names, zero_division=0)
-
-            # get scores
-            micro_f_score = round(metrics.fbeta_score(y_true, y_pred, beta=self.beta, average='micro', zero_division=0),
-                                  4)
-            accuracy_score = round(metrics.accuracy_score(y_true, y_pred), 4)
-            macro_f_score = round(metrics.fbeta_score(y_true, y_pred, beta=self.beta, average='macro', zero_division=0),
-                                  4)
-            precision_score = round(metrics.precision_score(y_true, y_pred, average='macro', zero_division=0), 4)
-            recall_score = round(metrics.recall_score(y_true, y_pred, average='macro', zero_division=0), 4)
-
-            detailed_result = (
-                    "\nResults:"
-                    f"\n- F-score (micro) {micro_f_score}"
-                    f"\n- F-score (macro) {macro_f_score}"
-                    f"\n- Accuracy {accuracy_score}"
-                    '\n\nBy class:\n' + classification_report
-            )
-
-            # line for log file
-            if not self.multi_label:
-                log_header = "ACCURACY"
-                log_line = f"\t{accuracy_score}"
-            else:
-                log_header = "PRECISION\tRECALL\tF1\tACCURACY"
-                log_line = f"{precision_score}\t" \
-                           f"{recall_score}\t" \
-                           f"{macro_f_score}\t" \
-                           f"{accuracy_score}"
-
-            result = Result(
-                main_score=micro_f_score,
-                log_line=log_line,
-                log_header=log_header,
-                detailed_results=detailed_result,
-            )
-
-            eval_loss /= batch_count
-
-            return result, eval_loss
 
     @staticmethod
     def _filter_empty_sentences(sentences: List[Sentence]) -> List[Sentence]:
@@ -470,7 +336,7 @@ class TextClassifier(flair.nn.Model):
         hu_path: str = "https://nlp.informatik.hu-berlin.de/resources/models"
 
         model_map["de-offensive-language"] = "/".join(
-            [hu_path, "de-offensive-language", "germ-eval-2018-task-1-v0.5.pt"]
+            [hu_path, "de-offensive-language", "germ-eval-2018-task-1-v0.8.pt"]
         )
 
         # English sentiment models
@@ -481,7 +347,7 @@ class TextClassifier(flair.nn.Model):
             [hu_path, "sentiment-curated-distilbert", "sentiment-en-mix-distillbert_4.pt"]
         )
         model_map["sentiment-fast"] = "/".join(
-            [hu_path, "sentiment-curated-fasttext-rnn", "sentiment-en-mix-ft-rnn.pt"]
+            [hu_path, "sentiment-curated-fasttext-rnn", "sentiment-en-mix-ft-rnn_v8.pt"]
         )
 
         # Communicative Functions Model
@@ -500,6 +366,139 @@ class TextClassifier(flair.nn.Model):
                f'  (beta): {self.beta}\n' + \
                f'  (weights): {self.weight_dict}\n' + \
                f'  (weight_tensor) {self.loss_weights}\n)'
+
+    @property
+    def label_type(self):
+        return self._label_type
+
+
+class TextPairClassifier(TextClassifier):
+    """
+    Text Pair Classification Model for tasks such as Recognizing Textual Entailment, build upon TextClassifier.
+    The model takes document embeddings and puts resulting text representation(s) into a linear layer to get the 
+    actual class label. We provide two ways to embed the DataPairs: Either by embedding both DataPoints
+    and concatenating the resulting vectors ("embed_separately=True") or by concatenating the DataPoints and embedding
+    the resulting vector ("embed_separately=False").
+    """
+
+    def __init__(
+            self,
+            document_embeddings: flair.embeddings.DocumentEmbeddings,
+            label_dictionary: Dictionary,
+            embed_separately: bool = False,
+            label_type: str = None,
+            multi_label: bool = None,
+            multi_label_threshold: float = 0.5,
+            beta: float = 1.0,
+            loss_weights: Dict[str, float] = None,
+    ):
+        """
+        :param document_embeddings: embeddings used to embed the Datapairs
+        :param label_dictionary: dictionary of labels you want to predict
+        :param label_type: name of the label
+        :param embed_separately: If True, the model embeds both data points separately, else cross-embedding
+        :param multi_label: auto-detected by default, but you can set this to True to force multi-label prediction
+        or False to force single-label prediction
+        :param multi_label_threshold: If multi-label you can set the threshold to make predictions
+        :param beta: Parameter for F-beta score for evaluation and training annealing
+        :param loss_weights: Dictionary of weights for labels for the loss function
+        (if any label's weight is unspecified it will default to 1.0)
+        """
+
+        self.bi_mode = embed_separately
+        # Initialize TextClassifier
+        super(TextPairClassifier, self).__init__(document_embeddings,
+                                                 label_dictionary,
+                                                 label_type=label_type,
+                                                 multi_label=multi_label,
+                                                 multi_label_threshold=multi_label_threshold,
+                                                 beta=beta,
+                                                 loss_weights=loss_weights)
+
+        # if bi_mode == True the linear layer needs twice the length of the embeddings as input size
+        # since we concatenate the embeddings of the two DataPoints in the DataPairs
+        if self.bi_mode:
+            self.decoder = nn.Linear(
+                2 * self.document_embeddings.embedding_length, len(self.label_dictionary)
+            ).to(flair.device)
+
+            nn.init.xavier_uniform_(self.decoder.weight)
+
+        # else, set separator to concatenate two sentences
+        else:
+            self.sep = ' '
+            if isinstance(self.document_embeddings, flair.embeddings.document.TransformerDocumentEmbeddings):
+                if self.document_embeddings.tokenizer.sep_token:
+                    self.sep = ' ' + str(self.document_embeddings.tokenizer.sep_token) + ' '
+                else:
+                    self.sep = ' [SEP] '
+
+    def _get_state_dict(self):
+        model_state = super()._get_state_dict()
+        model_state["bi_mode"] = self.bi_mode
+        return model_state
+
+    @staticmethod
+    def _init_model_with_state_dict(state):
+        beta = 1.0 if "beta" not in state.keys() else state["beta"]
+        weights = None if "weight_dict" not in state.keys() else state["weight_dict"]
+        label_type = None if "label_type" not in state.keys() else state["label_type"]
+        mode = True if "bi_mode" not in state.keys() else state["bi_mode"]
+
+        model = TextPairClassifier(
+            document_embeddings=state["document_embeddings"],
+            label_dictionary=state["label_dictionary"],
+            label_type=label_type,
+            multi_label=state["multi_label"],
+            beta=beta,
+            loss_weights=weights,
+            embed_separately=mode
+        )
+
+        model.load_state_dict(state["state_dict"])
+        return model
+
+    def forward(self, datapairs):
+
+        embedding_names = self.document_embeddings.get_names()
+
+        if isinstance(datapairs, DataPair):
+            datapairs = [datapairs]
+
+        if self.bi_mode:  # embed both sentences seperately, concatenate the resulting vectors
+            first_elements = [pair.first for pair in datapairs]
+            second_elements = [pair.second for pair in datapairs]
+
+            self.document_embeddings.embed(first_elements)
+
+            self.document_embeddings.embed(second_elements)
+
+            text_embedding_list = [
+                torch.cat([a.get_embedding(embedding_names), b.get_embedding(embedding_names)], 0).unsqueeze(0)
+                for (a, b) in zip(first_elements, second_elements)
+            ]
+
+        else:  # concatenate the sentences and embed together
+
+            concatenated_sentences = [
+                Sentence(
+                    pair.first.to_tokenized_string() + self.sep + pair.second.to_tokenized_string(),
+                    use_tokenizer=False
+                )
+                for pair in datapairs]
+
+            self.document_embeddings.embed(concatenated_sentences)
+
+            text_embedding_list = [
+                sentence.get_embedding(embedding_names).unsqueeze(0) for sentence in concatenated_sentences
+            ]
+
+        text_embedding_tensor = torch.cat(text_embedding_list, 0).to(flair.device)
+
+        # linear layer
+        label_scores = self.decoder(text_embedding_tensor)
+
+        return label_scores
 
 
 class TARSClassifier(TextClassifier):
@@ -684,7 +683,7 @@ class TARSClassifier(TextClassifier):
             plausible_labels = []
             plausible_label_probabilities = []
             for plausible_label in self.label_nearest_map[label]:
-                if plausible_label in already_sampled_negative_labels:
+                if plausible_label in already_sampled_negative_labels or plausible_label in labels:
                     continue
                 else:
                     plausible_labels.append(plausible_label)
@@ -709,7 +708,7 @@ class TARSClassifier(TextClassifier):
         label_text_pair = " ".join([self._get_cleaned_up_label(label),
                                     self.tars_model.document_embeddings.tokenizer.sep_token,
                                     original_text])
-        label_text_pair_sentence = Sentence(label_text_pair)
+        label_text_pair_sentence = Sentence(label_text_pair, use_tokenizer=False)
         if tars_label is not None:
             if tars_label:
                 label_text_pair_sentence.add_label(self.tars_model.label_type,
@@ -756,7 +755,7 @@ class TARSClassifier(TextClassifier):
             self.multi_label_threshold = \
                 self.task_specific_attributes[task_name]['multi_label_threshold']
             self.label_dictionary = self.task_specific_attributes[task_name]['label_dictionary']
-            self.label_type = self.task_specific_attributes[task_name]['label_type']
+            self.task_name = task_name
             self.beta = self.task_specific_attributes[task_name]['beta']
 
     def _get_state_dict(self):
@@ -772,13 +771,18 @@ class TARSClassifier(TextClassifier):
     @staticmethod
     def _init_model_with_state_dict(state):
         task_name = state["current_task"]
-        label_dictionary = state["task_specific_attributes"][task_name]['label_dictionary']
-
         print("init TARS")
-        model = TARSClassifier(task_name, label_dictionary)
+
+        # init new TARS classifier
+        model = TARSClassifier(
+            task_name,
+            label_dictionary=state["task_specific_attributes"][task_name]['label_dictionary'],
+            document_embeddings=state["tars_model"].document_embeddings,
+            num_negative_labels_to_sample=state["num_negative_labels_to_sample"],
+        )
+        # set all task information
         model.task_specific_attributes = state["task_specific_attributes"]
-        model.tars_model = state["tars_model"]
-        model.num_negative_labels_to_sample = state["num_negative_labels_to_sample"]
+        # linear layers of internal classifier
         model.load_state_dict(state["state_dict"])
         return model
 
@@ -914,7 +918,7 @@ class TARSClassifier(TextClassifier):
             self._drop_task(TARSClassifier.static_adhoc_task_identifier)
 
         return
-      
+
     def predict_all_tasks(self, sentences: Union[List[Sentence], Sentence]):
 
         # remember current task
@@ -934,10 +938,14 @@ class TARSClassifier(TextClassifier):
         model_map = {}
         hu_path: str = "https://nlp.informatik.hu-berlin.de/resources/models"
 
-        model_map["tars-base"] = "/".join([hu_path, "tars-base", "tars-base-t4.pt"])
+        model_map["tars-base"] = "/".join([hu_path, "tars-base", "tars-base-v8.pt"])
 
         cache_dir = Path("models")
         if model_name in model_map:
             model_name = cached_path(model_map[model_name], cache_dir=cache_dir)
 
         return model_name
+
+    @property
+    def label_type(self):
+        return self.task_specific_attributes[self.task_name]['label_type']
